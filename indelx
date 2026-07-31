@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NSW Live Wholesale Electricity Price</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1e242e; --line:#2a313c;
+    --text:#e8edf4; --muted:#8b96a5; --accent:#4da3ff;
+    --green:#37d67a; --amber:#f5a623; --red:#ff5c5c; --blue:#3ea6ff;
+    --shadow:0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 70% -10%,#1a2230 0%,var(--bg) 55%);
+    color:var(--text); font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    min-height:100vh; padding:22px;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+  h1{font-size:20px;margin:0;font-weight:600;letter-spacing:.2px}
+  h1 span{color:var(--muted);font-weight:400}
+  .status{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block;margin-right:7px;vertical-align:middle}
+  .dot.live{background:var(--green);box-shadow:0 0 0 0 rgba(55,214,122,.7);animation:pulse 2s infinite}
+  .dot.err{background:var(--red)}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(55,214,122,.6)}70%{box-shadow:0 0 0 8px rgba(55,214,122,0)}100%{box-shadow:0 0 0 0 rgba(55,214,122,0)}}
+
+  .grid{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
+  .label{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px}
+
+  .price-main{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .price{font-size:64px;font-weight:700;line-height:1;letter-spacing:-1px}
+  .unit{font-size:20px;color:var(--muted);font-weight:500}
+  .arrow{font-size:26px;font-weight:700}
+  .up{color:var(--red)} .down{color:var(--green)} .flat{color:var(--muted)}
+  .ckwh{margin-top:12px;font-size:17px;color:var(--muted)}
+  .ckwh b{color:var(--text)}
+  .band{display:inline-block;margin-top:16px;padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600}
+
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .stat .v{font-size:22px;font-weight:600;margin-top:4px}
+  .stat .s{font-size:12px;color:var(--muted)}
+
+  .chart-card{margin-top:16px}
+  canvas{width:100%;height:220px;display:block}
+
+  footer{margin-top:18px;font-size:12px;color:var(--muted);line-height:1.6}
+  .controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:13px}
+  .toggle{display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer;user-select:none}
+  .toggle input{accent-color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 14px;border-radius:9px;cursor:pointer;font-size:13px}
+  .btn:hover{border-color:var(--accent)}
+  .err-banner{display:none;background:rgba(255,92,92,.12);border:1px solid rgba(255,92,92,.4);color:#ffb4b4;padding:12px 16px;border-radius:12px;margin-bottom:16px;font-size:13px;line-height:1.5}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>NSW Wholesale Electricity Price <span>· live spot (NEM · NSW1)</span></h1>
+    <div class="status">
+      <span><span id="dot" class="dot"></span><span id="statusText">Connecting…</span></span>
+      <span id="lastUpdated">Last update: —</span>
+      <span>Next refresh: <b id="countdown">—</b>s</span>
+    </div>
+  </header>
+
+  <div id="errBanner" class="err-banner"></div>
+
+  <div class="grid">
+    <!-- Main price -->
+    <div class="card">
+      <div class="label">Current spot price</div>
+      <div class="price-main">
+        <span class="price" id="priceMwh">—</span>
+        <span class="unit">$/MWh</span>
+        <span class="arrow flat" id="arrow">•</span>
+      </div>
+      <div class="ckwh">≈ <b id="priceCkwh">—</b> c/kWh (wholesale component only)</div>
+      <div><span class="band" id="band" style="background:#2a313c;color:#8b96a5">—</span></div>
+      <div class="controls">
+        <button class="btn" id="refreshBtn">Refresh now</button>
+        <label class="toggle"><input type="checkbox" id="proxyToggle" /> Force proxy (skip direct)</label>
+        <span style="color:var(--muted)">Connection: <b id="proxyName" style="color:var(--text)">…</b></span>
+      </div>
+    </div>
+
+    <!-- Secondary stats -->
+    <div class="card">
+      <div class="label">Region snapshot</div>
+      <div class="stats">
+        <div class="stat"><div class="s">Total demand</div><div class="v" id="demand">—</div></div>
+        <div class="stat"><div class="s">Net interchange</div><div class="v" id="interchange">—</div></div>
+        <div class="stat"><div class="s">Settlement time</div><div class="v" id="settle" style="font-size:15px">—</div></div>
+        <div class="stat"><div class="s">Region</div><div class="v">NSW1</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card chart-card">
+    <div class="label">Price this session ($/MWh)</div>
+    <canvas id="chart" width="1000" height="220"></canvas>
+  </div>
+
+  <footer>
+    <b>Data source:</b> AEMO public <code>ELEC_NEM_SUMMARY</code> feed (the same data behind AEMO's NEM dashboard).
+    Prices are <b>wholesale spot only</b> — they exclude network, environmental/carbon charges, and retail margin, so they are <b>not</b> a full retail bill rate.
+    The NEM dispatches a new price every <b>5 minutes</b>; this page polls every 30 seconds so it picks up each new interval quickly.
+    Conversion: c/kWh = ($/MWh) ÷ 10. Not affiliated with AEMO. For information only.
+  </footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---- Config ----
+  const REGION = "NSW1";
+  const REFRESH_SECONDS = 30;
+  const AEMO_URL = "https://visualisations.aemo.com.au/aemo/apps/api/report/ELEC_NEM_SUMMARY";
+  // Cascade of public CORS proxies — tried in order until one works.
+  // No install/admin rights needed; works from a plain double-click or when hosted.
+  const PROXIES = [
+    u => u,                                                             // 1. direct (works if AEMO allows CORS)
+    u => "https://corsproxy.io/?url=" + encodeURIComponent(u),          // 2.
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u), // 3.
+    u => "https://thingproxy.freeboard.io/fetch/" + u                   // 4.
+  ];
+  let workingProxy = 0; // remember which one succeeded to avoid re-trying failures each cycle
+
+  // ---- State ----
+  let prevPrice = null;
+  const history = [];              // {p: number, settle: string}
+  let countdown = REFRESH_SECONDS;
+  let timer = null;
+
+  // ---- Elements ----
+  const el = id => document.getElementById(id);
+  const dot = el("dot"), statusText = el("statusText");
+
+  // ---- Helpers ----
+  const fmt = (n, d=2) => (n===null||n===undefined||isNaN(n)) ? "—" : Number(n).toLocaleString("en-AU",{minimumFractionDigits:d,maximumFractionDigits:d});
+
+  function priceBand(p){
+    if (p < 0)     return {t:"Negative price", bg:"rgba(62,166,255,.18)", c:"#7cc4ff"};
+    if (p < 50)    return {t:"Low", bg:"rgba(55,214,122,.16)", c:"#37d67a"};
+    if (p < 150)   return {t:"Normal", bg:"rgba(139,150,165,.18)", c:"#c3ccd8"};
+    if (p < 300)   return {t:"Elevated", bg:"rgba(245,166,35,.18)", c:"#f5a623"};
+    if (p < 1000)  return {t:"High", bg:"rgba(255,92,92,.18)", c:"#ff7a7a"};
+    return {t:"Extreme", bg:"rgba(255,92,92,.30)", c:"#ff5c5c"};
+  }
+
+  function setStatus(state, text){
+    dot.className = "dot" + (state==="live"?" live":state==="err"?" err":"");
+    statusText.textContent = text;
+  }
+
+  function showError(msg){
+    const b = el("errBanner");
+    b.style.display = "block";
+    b.innerHTML = msg;
+  }
+  function clearError(){ el("errBanner").style.display = "none"; }
+
+  // Robustly pull the NSW1 record out of the AEMO payload
+  function extractNSW(data){
+    let rows = null;
+    if (Array.isArray(data)) rows = data;
+    else if (data && Array.isArray(data.ELEC_NEM_SUMMARY)) rows = data.ELEC_NEM_SUMMARY;
+    else if (data){
+      for (const k in data){ if (Array.isArray(data[k])){ rows = data[k]; break; } }
+    }
+    if (!rows) return null;
+    return rows.find(r => (r.REGIONID||r.REGION||"").toUpperCase() === REGION) || null;
+  }
+
+  function num(r, keys){
+    for (const k of keys){ if (r[k]!==undefined && r[k]!==null && r[k]!=="") return Number(r[k]); }
+    return null;
+  }
+
+  async function fetchData(){
+    // If the user forces the proxy, skip the direct attempt.
+    const forceProxy = el("proxyToggle").checked;
+    const startIdx = forceProxy ? 1 : workingProxy;
+
+    let lastErr = null;
+    for (let i = startIdx; i < PROXIES.length; i++){
+      try{
+        const url = PROXIESAEMO_URL;
+        const res = await fetch(url, { headers:{ "Accept":"application/json" }, cache:"no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const json = await res.json();
+        workingProxy = i;                 // remember the winner for next cycles
+        el("proxyName").textContent = i === 0 ? "direct" : "proxy #" + i;
+        return json;
+      }catch(e){
+        lastErr = e;                      // try the next proxy in the cascade
+      }
+    }
+    throw lastErr || new Error("All connection methods failed");
+  }
+
+  async function update(){
+    try{
+      const data = await fetchData();
+      const r = extractNSW(data);
+      if (!r) throw new Error("NSW1 record not found in response");
+
+      const price = num(r, ["PRICE","RRP","price"]);
+      if (price === null) throw new Error("Price field missing");
+
+      const demand = num(r, ["TOTALDEMAND","totaldemand"]);
+      const inter  = num(r, ["NETINTERCHANGE","netinterchange"]);
+      const settle = r.SETTLEMENTDATE || r.settlementdate || "";
+
+      // Price + direction
+      el("priceMwh").textContent = fmt(price, 2);
+      el("priceCkwh").textContent = fmt(price/10, 2);
+      const arrow = el("arrow");
+      if (prevPrice === null || price === prevPrice){ arrow.textContent="•"; arrow.className="arrow flat"; }
+      else if (price > prevPrice){ arrow.textContent="▲"; arrow.className="arrow up"; }
+      else { arrow.textContent="▼"; arrow.className="arrow down"; }
+
+      // Band
+      const band = priceBand(price);
+      const bandEl = el("band");
+      bandEl.textContent = band.t + " · $" + fmt(price,0) + "/MWh";
+      bandEl.style.background = band.bg; bandEl.style.color = band.c;
+
+      // Stats
+      el("demand").textContent = demand===null ? "—" : fmt(demand,0)+" MW";
+      el("interchange").textContent = inter===null ? "—" : fmt(inter,0)+" MW";
+      el("settle").textContent = settle ? settle.replace("T"," ").slice(0,19) : "—";
+
+      // History (only push when settlement changes or first load)
+      const last = history[history.length-1];
+      if (!last || last.settle !== settle){
+        history.push({ p:price, settle });
+        if (history.length > 120) history.shift();
+        drawChart();
+      }
+
+      prevPrice = price;
+      el("lastUpdated").textContent = "Last update: " + new Date().toLocaleTimeString("en-AU");
+      setStatus("live","Live");
+      clearError();
+    }catch(err){
+      setStatus("err","Error");
+      showError(
+        "<b>Couldn't load live data:</b> " + err.message + ".<br>" +
+        "The page automatically tried the direct AEMO call <b>and</b> several public proxies, but all failed. " +
+        "Likely causes: no internet connection, your network/firewall blocks these hosts, or the public proxies are " +
+        "temporarily rate-limited. Click <b>“Refresh now”</b> to retry, or tick <b>“Force proxy”</b> to skip the direct attempt."
+      );
+    }
+  }
+
+  // ---- Simple canvas line chart (no libraries) ----
+  function drawChart(){
+    const c = el("chart"), ctx = c.getContext("2d");
+    const W = c.width, H = c.height, pad = 34;
+    ctx.clearRect(0,0,W,H);
+    if (history.length < 2){
+      ctx.fillStyle = "#8b96a5"; ctx.font = "13px Segoe UI";
+      ctx.fillText("Collecting data… a new point appears each 5-min interval.", pad, H/2);
+      return;
+    }
+    const ps = history.map(h=>h.p);
+    let min = Math.min(...ps), max = Math.max(...ps);
+    if (min === max){ min -= 1; max += 1; }
+    const range = max - min;
+    const x = i => pad + (i/(history.length-1))*(W-pad*2);
+    const y = p => H-pad - ((p-min)/range)*(H-pad*2);
+
+    // gridlines + y labels
+    ctx.strokeStyle = "#2a313c"; ctx.fillStyle = "#8b96a5"; ctx.font = "11px Segoe UI"; ctx.lineWidth = 1;
+    for (let g=0; g<=4; g++){
+      const yy = pad + g*((H-pad*2)/4);
+      const val = max - (g/4)*range;
+      ctx.beginPath(); ctx.moveTo(pad,yy); ctx.lineTo(W-pad,yy); ctx.stroke();
+      ctx.fillText("$"+val.toFixed(0), 2, yy+3);
+    }
+    // area fill
+    ctx.beginPath(); ctx.moveTo(x(0), y(ps[0]));
+    ps.forEach((p,i)=>ctx.lineTo(x(i),y(p)));
+    ctx.lineTo(x(ps.length-1), H-pad); ctx.lineTo(x(0), H-pad); ctx.closePath();
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,"rgba(77,163,255,.35)"); grad.addColorStop(1,"rgba(77,163,255,0)");
+    ctx.fillStyle = grad; ctx.fill();
+    // line
+    ctx.beginPath(); ctx.moveTo(x(0), y(ps[0]));
+    ps.forEach((p,i)=>ctx.lineTo(x(i),y(p)));
+    ctx.strokeStyle = "#4da3ff"; ctx.lineWidth = 2; ctx.stroke();
+    // last point
+    const li = ps.length-1;
+    ctx.beginPath(); ctx.arc(x(li), y(ps[li]), 4, 0, Math.PI*2);
+    ctx.fillStyle = "#4da3ff"; ctx.fill();
+  }
+
+  // ---- Timer loop ----
+  function tick(){
+    countdown--;
+    if (countdown <= 0){ countdown = REFRESH_SECONDS; update(); }
+    el("countdown").textContent = countdown;
+  }
+  function startLoop(){
+    clearInterval(timer);
+    countdown = REFRESH_SECONDS;
+    el("countdown").textContent = countdown;
+    timer = setInterval(tick, 1000);
+  }
+
+  // ---- Events ----
+  el("refreshBtn").addEventListener("click", () => { countdown = REFRESH_SECONDS; el("countdown").textContent = countdown; update(); });
+  el("proxyToggle").addEventListener("change", () => { countdown = REFRESH_SECONDS; update(); });
+
+  // ---- Init ----
+  window.addEventListener("resize", drawChart);
+  setStatus("", "Connecting…");
+  update();
+  startLoop();
+})();
+</script>
+</body>
+</html>
